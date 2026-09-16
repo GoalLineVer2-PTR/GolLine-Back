@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Goal-Line Tech | Simulador</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --accent: #38bdf8;
+            --success: #10b981;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.15), transparent 25%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            width: 100%;
+            padding: 2rem;
+            text-align: center;
+            background: linear-gradient(180deg, rgba(15,23,42,1) 0%, rgba(15,23,42,0) 100%);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin: 0;
+            font-weight: 800;
+            background: linear-gradient(90deg, var(--accent), var(--success));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            width: 90%;
+            max-width: 1200px;
+            margin-top: 2rem;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            padding: 2rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+            color: var(--text-main);
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        button {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 600;
+            padding: 1rem 2rem;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-miss {
+            background: rgba(56, 189, 248, 0.1);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+
+        .btn-miss:hover {
+            background: rgba(56, 189, 248, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .btn-goal {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.39);
+        }
+
+        .btn-goal:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.23);
+        }
+
+        .logs {
+            height: 300px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .log-entry {
+            background: rgba(0, 0, 0, 0.3);
+            border-left: 4px solid var(--text-muted);
+            padding: 1rem;
+            border-radius: 0 8px 8px 0;
+            font-family: monospace;
+            font-size: 0.9rem;
+            animation: slideIn 0.3s ease-out forwards;
+        }
+
+        .log-entry.goal {
+            border-left-color: var(--success);
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        .connection-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ef4444;
+            box-shadow: 0 0 10px #ef4444;
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        /* Scrollbar styles */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+
+        .big-alert {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.5);
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            padding: 2rem 4rem;
+            border-radius: 24px;
+            font-size: 4rem;
+            font-weight: 800;
+            box-shadow: 0 25px 50px -12px rgba(16, 185, 129, 0.5);
+            opacity: 0;
+            pointer-events: none;
+            z-index: 1000;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .big-alert.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Goal-Line Simulator</h1>
+        <p>Monitor SignalR en Tiempo Real</p>
+    </header>
+
+    <div class="container">
+        <!-- Controles para Simular POST desde Unity -->
+        <div class="panel">
+            <h2>1. Simulador Unity (HTTP POST)</h2>
+            <p style="color: var(--text-muted); margin-bottom: 2rem;">Envía un disparo simulando el cliente de Unity a la API <code>/api/disparos</code>.</p>
+            
+            <div class="control-group">
+                <button class="btn-miss" onclick="simularDisparo(false)">Simular Tiro Afuera</button>
+                <button class="btn-goal" onclick="simularDisparo(true)">Simular GOL ⚽</button>
+            </div>
+        </div>
+
+        <!-- Monitor de SignalR -->
+        <div class="panel">
+            <h2>2. Monitor SignalR</h2>
+            <div class="connection-status">
+                <div id="statusDot" class="status-dot"></div>
+                <span id="statusText">Desconectado</span>
+            </div>
+            
+            <div class="logs" id="logsContainer">
+                <div class="log-entry">Esperando eventos de SignalR...</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="bigAlert" class="big-alert">¡GOL! ⚽</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script>
+        // --- 1. Conexión a SignalR ---
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/goalHub")
+            .withAutomaticReconnect()
+            .build();
+
+        // Recibir evento AlertaGol
+        connection.on("AlertaGol", (disparo) => {
+            agregarLog(`¡ALERTA RECIBIDA! Gol a ${disparo.velocidad} km/h (X: ${disparo.coordenadaX}, Y: ${disparo.coordenadaY})`, true);
+            mostrarAlertaGigante();
+        });
+
+        connection.start().then(() => {
+            document.getElementById('statusDot').classList.add('connected');
+            document.getElementById('statusText').innerText = 'Conectado al GoalHub';
+        }).catch(err => console.error("Error conectando a SignalR:", err));
+
+
+        // --- 2. Simulación de POST ---
+        async function simularDisparo(fueGol) {
+            const payload = {
+                coordenadaX: parseFloat((Math.random() * 10).toFixed(2)),
+                coordenadaY: parseFloat((Math.random() * 5).toFixed(2)),
+                velocidad: parseFloat((Math.random() * 120 + 30).toFixed(2)),
+                fueGol: fueGol,
+                timestampUnity: new Date().toISOString()
+            };
+
+            agregarLog(`Enviando POST /api/disparos (Gol: ${fueGol})`, false);
+
+            try {
+                const response = await fetch('/api/disparos', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if(!response.ok) {
+                    agregarLog(`Error en el servidor: ${response.status}`, false);
+                }
+            } catch (error) {
+                agregarLog(`Error de red: ${error}`, false);
+            }
+        }
+
+        // --- Utilidades de UI ---
+        function agregarLog(mensaje, esGol) {
+            const logs = document.getElementById('logsContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${esGol ? 'goal' : ''}`;
+            
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<strong>[${time}]</strong> ${mensaje}`;
+            
+            logs.prepend(entry);
+        }
+
+        function mostrarAlertaGigante() {
+            const alert = document.getElementById('bigAlert');
+            alert.classList.add('show');
+            setTimeout(() => {
+                alert.classList.remove('show');
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
