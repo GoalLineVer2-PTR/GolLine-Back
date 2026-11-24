@@ -24,13 +24,13 @@ public class DisparosController : ControllerBase
         _hubContext = hubContext;
     }
 
-    // --- ENDPOINT PARA LEER LOS TIROS EN UNITY ---
+    // --- ENDPOINT PARA LEER LOS TIROS EN GODOT 4 Y CABINA VAR WEB ---
     [HttpGet]
     public async Task<IActionResult> Get()
     {
-        // Trae todo el historial ordenado del más nuevo al más viejo, sin límite
         var historial = await _disparosCollection.Find(_ => true)
                                            .SortByDescending(d => d.TimestampServidor)
+                                           .Limit(50)
                                            .ToListAsync();
 
         return Ok(historial);
@@ -41,11 +41,30 @@ public class DisparosController : ControllerBase
     {
         // Inyectar timestamp del servidor en UTC
         disparo.TimestampServidor = DateTime.UtcNow;
+        if (string.IsNullOrEmpty(disparo.TimestampUnity))
+        {
+            disparo.TimestampUnity = disparo.TimestampServidor.ToString("o");
+        }
 
         // Guardar asíncronamente en MongoDB
         await _disparosCollection.InsertOneAsync(disparo);
 
-        // Emitir alerta si fue gol
+        // Actualizar el estado del VAR automáticamente y notificar por SignalR
+        var nuevoEstadoVar = disparo.FueGol ? "gol" : "nogol";
+        EstadoVARController.SetEstado(nuevoEstadoVar);
+        await _hubContext.Clients.All.SendAsync("EstadoVARActualizado", new
+        {
+            estado = nuevoEstadoVar,
+            velocidad = disparo.Velocidad,
+            porcentajeCruzoLinea = disparo.PorcentajeCruzoLinea,
+            resultadoDetalle = disparo.ResultadoDetalle,
+            timestampUtc = disparo.TimestampServidor
+        });
+
+        // Emitir evento de telemetría para cualquier disparo (Gol o No Gol)
+        await _hubContext.Clients.All.SendAsync("NuevoDisparo", disparo);
+
+        // Emitir alerta si fue gol (compatibilidad intacta)
         if (disparo.FueGol)
         {
             await _hubContext.Clients.All.SendAsync("AlertaGol", disparo);

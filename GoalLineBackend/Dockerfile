@@ -2,25 +2,26 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
 WORKDIR /src
 
-# Copiar archivos de proyecto y restaurar dependencias
 COPY ["GoalLineBackend.csproj", "./"]
 RUN dotnet restore "GoalLineBackend.csproj"
 
-# Copiar el resto del código y compilar
 COPY . .
 RUN dotnet publish "GoalLineBackend.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-# Etapa final (imagen ligera de Alpine)
+# Etapa final (imagen ligera Alpine para Docker y Azure Container Apps)
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS final
 WORKDIR /app
 
-# Configuraciones para optimizar el uso de memoria en contenedores con baja RAM (1GB AWS Tier)
-# El GC modo workstation usa menos memoria.
+# Optimización de memoria para Azure Free Tier / contenedores ligeros
 ENV DOTNET_gcServer=0
 ENV DOTNET_TieredPGO=0
+ENV ASPNETCORE_URLS=http://+:8080
 
 EXPOSE 8080
-EXPOSE 8081
 
 COPY --from=build /app/publish .
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1
+
 ENTRYPOINT ["dotnet", "GoalLineBackend.dll"]
