@@ -39,6 +39,7 @@
     const btnLineRight = document.getElementById('btnLineRight');
     const btnNetBehind = document.getElementById('btnNetBehind');
     const btnNetGk = document.getElementById('btnNetGk');
+    const btnNetDrone = document.getElementById('btnNetDrone');
 
     const btnViewQuad = document.getElementById('btnViewQuad');
     const btnViewSingle = document.getElementById('btnViewSingle');
@@ -77,8 +78,15 @@
 
     // ── Envío de comandos hacia Godot 4 vía Backend ─────────────────────
     function sendCommand(payload) {
+        const body = JSON.stringify(payload);
         if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(payload));
+            ws.send(body);
+        } else {
+            fetch('/api/VarStream/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body
+            }).catch(() => {});
         }
     }
 
@@ -157,6 +165,11 @@
             return;
         }
 
+        if (msg.type === 'new_shot' && msg.shot) {
+            prependHistoryShot(msg.shot);
+            return;
+        }
+
         if (msg.type === 'telemetry') {
             if (!godotConnected) setGodotStatus(true);
             latestTelemetry = msg;
@@ -225,10 +238,12 @@
             btnLineRight.classList.toggle('active', !isLeft);
         }
         if (slotCams[3]) {
-            const isBehind = slotCams[3] === 'behindNet';
-            camTag3.innerHTML = `<span class="live-dot"></span> CAM 4 • ${isBehind ? 'DETRÁS DEL ARCO' : 'POV ARQUERO'}`;
-            btnNetBehind.classList.toggle('active', isBehind);
-            btnNetGk.classList.toggle('active', !isBehind);
+            const cam3 = slotCams[3];
+            const label3 = cam3 === 'behindNet' ? 'DETRÁS DEL ARCO' : (cam3 === 'gkPov' ? 'POV ARQUERO' : 'DRONE 360°');
+            camTag3.innerHTML = `<span class="live-dot"></span> CAM 4 • ${label3}`;
+            btnNetBehind.classList.toggle('active', cam3 === 'behindNet');
+            btnNetGk.classList.toggle('active', cam3 === 'gkPov');
+            if (btnNetDrone) btnNetDrone.classList.toggle('active', cam3 === 'freeOrbit');
         }
 
         // Overlays
@@ -354,20 +369,41 @@
             const detail = shot.resultadoDetalle || (shot.fueGol ? 'GOL' : 'NO GOL');
             const origen = shot.origen || 'Godot4';
 
-            item.innerHTML = `
-                <div class="history-item__info">
-                    <div class="history-item__title">${shot.fueGol ? '⚽' : '🧤'} ${detail}</div>
-                    <div class="history-item__meta">${vel} km/h • GLT ${pct}% • ${origen}</div>
-                </div>
-                <button class="btn-load-shot" data-idx="${idx}">▶ Replay</button>
-            `;
+            const info = document.createElement('div');
+            info.className = 'history-item__info';
 
-            item.querySelector('.btn-load-shot').addEventListener('click', () => {
+            const titleEl = document.createElement('div');
+            titleEl.className = 'history-item__title';
+            titleEl.textContent = `${shot.fueGol ? '⚽' : '🧤'} ${detail}`;
+
+            const metaEl = document.createElement('div');
+            metaEl.className = 'history-item__meta';
+            metaEl.textContent = `${vel} km/h • GLT ${pct}% • ${origen}`;
+
+            info.appendChild(titleEl);
+            info.appendChild(metaEl);
+
+            const btn = document.createElement('button');
+            btn.className = 'btn-load-shot';
+            btn.dataset.idx = String(idx);
+            btn.textContent = '▶ Replay';
+            btn.addEventListener('click', () => {
                 sendCommand({ action: 'load_history_shot', shot });
             });
 
+            item.appendChild(info);
+            item.appendChild(btn);
+
             historyList.appendChild(item);
         });
+    }
+
+    function prependHistoryShot(disparo) {
+        if (!disparo) return;
+        if (disparo.id && historyShots.some(s => s.id === disparo.id)) return;
+        historyShots.unshift(disparo);
+        if (historyShots.length > 50) historyShots.pop();
+        renderHistory();
     }
 
     function initSignalR() {
@@ -378,9 +414,7 @@
             .build();
 
         connection.on('NuevoDisparo', (disparo) => {
-            historyShots.unshift(disparo);
-            if (historyShots.length > 50) historyShots.pop();
-            renderHistory();
+            prependHistoryShot(disparo);
         });
 
         connection.start().catch(() => {});
@@ -430,10 +464,21 @@
         }
     });
 
-    btnLineLeft.addEventListener('click', () => sendCommand({ action: 'switch_line_cam', cam: 'varLeft' }));
-    btnLineRight.addEventListener('click', () => sendCommand({ action: 'switch_line_cam', cam: 'varRight' }));
-    btnNetBehind.addEventListener('click', () => sendCommand({ action: 'switch_net_cam', cam: 'behindNet' }));
-    btnNetGk.addEventListener('click', () => sendCommand({ action: 'switch_net_cam', cam: 'gkPov' }));
+    btnLineLeft.addEventListener('click', (e) => { e.stopPropagation(); sendCommand({ action: 'switch_line_cam', cam: 'varLeft' }); });
+    btnLineRight.addEventListener('click', (e) => { e.stopPropagation(); sendCommand({ action: 'switch_line_cam', cam: 'varRight' }); });
+    btnNetBehind.addEventListener('click', (e) => { e.stopPropagation(); sendCommand({ action: 'switch_net_cam', cam: 'behindNet' }); });
+    btnNetGk.addEventListener('click', (e) => { e.stopPropagation(); sendCommand({ action: 'switch_net_cam', cam: 'gkPov' }); });
+    if (btnNetDrone) {
+        btnNetDrone.addEventListener('click', (e) => { e.stopPropagation(); sendCommand({ action: 'switch_net_cam', cam: 'freeOrbit' }); });
+    }
+
+    // Zoom del Drone con rueda del mouse sobre CAM 4 cuando está en modo DRONE
+    camCards[3].querySelector('.cam-card__stage').addEventListener('wheel', (e) => {
+        const slotCams = latestTelemetry && Array.isArray(latestTelemetry.slotCams) ? latestTelemetry.slotCams : [];
+        if (slotCams[3] !== 'freeOrbit') return;
+        e.preventDefault();
+        sendCommand({ action: 'drone_orbit', dRadius: e.deltaY > 0 ? 0.8 : -0.8 });
+    }, { passive: false });
 
     // ── Controles Remotos de Replay ─────────────────────────────────────
     btnReplayPlayPause.addEventListener('click', () => sendCommand({ action: 'replay_toggle' }));

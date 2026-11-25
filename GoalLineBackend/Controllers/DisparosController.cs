@@ -1,5 +1,6 @@
 using GoalLineBackend.Hubs;
 using GoalLineBackend.Models;
+using GoalLineBackend.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
@@ -13,15 +14,18 @@ public class DisparosController : ControllerBase
 {
     private readonly IMongoCollection<Disparo> _disparosCollection;
     private readonly IHubContext<GoalHub> _hubContext;
+    private readonly VarStreamRelayService _relay;
 
     public DisparosController(
         IOptions<MongoDBSettings> mongoDBSettings,
         IMongoClient mongoClient,
-        IHubContext<GoalHub> hubContext)
+        IHubContext<GoalHub> hubContext,
+        VarStreamRelayService relay)
     {
         var mongoDatabase = mongoClient.GetDatabase(mongoDBSettings.Value.DatabaseName);
         _disparosCollection = mongoDatabase.GetCollection<Disparo>(mongoDBSettings.Value.CollectionName);
         _hubContext = hubContext;
+        _relay = relay;
     }
 
     // --- ENDPOINT PARA LEER LOS TIROS EN GODOT 4 Y CABINA VAR WEB ---
@@ -51,17 +55,16 @@ public class DisparosController : ControllerBase
 
         // Actualizar el estado del VAR automáticamente y notificar por SignalR
         var nuevoEstadoVar = disparo.FueGol ? "gol" : "nogol";
-        EstadoVARController.SetEstado(nuevoEstadoVar);
-        await _hubContext.Clients.All.SendAsync("EstadoVARActualizado", new
-        {
-            estado = nuevoEstadoVar,
-            velocidad = disparo.Velocidad,
-            porcentajeCruzoLinea = disparo.PorcentajeCruzoLinea,
-            resultadoDetalle = disparo.ResultadoDetalle,
-            timestampUtc = disparo.TimestampServidor
-        });
+        var snapVar = EstadoVARController.SetEstado(
+            nuevoEstadoVar,
+            disparo.Velocidad,
+            disparo.PorcentajeCruzoLinea,
+            disparo.ResultadoDetalle);
+        _relay.BroadcastVarState(snapVar);
+        await _hubContext.Clients.All.SendAsync("EstadoVARActualizado", snapVar);
 
-        // Emitir evento de telemetría para cualquier disparo (Gol o No Gol)
+        // Emitir evento de telemetría para cualquier disparo (Gol o No Gol) por WS y SignalR
+        _relay.BroadcastNewShot(disparo);
         await _hubContext.Clients.All.SendAsync("NuevoDisparo", disparo);
 
         // Emitir alerta si fue gol (compatibilidad intacta)

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using GoalLineBackend.Hubs;
 using GoalLineBackend.Models;
 using GoalLineBackend.Services;
@@ -7,11 +9,11 @@ using MongoDB.Driver;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// En local (--no-launch-profile) escucha en 0.0.0.0:8080; en Docker/Azure respeta ASPNETCORE_URLS
+// En local (--no-launch-profile) escucha en IPv4 e IPv6 (:8080); en Docker/Azure respeta ASPNETCORE_URLS
 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")) &&
     string.IsNullOrEmpty(builder.Configuration["Urls"]))
 {
-    builder.WebHost.UseUrls("http://0.0.0.0:8080");
+    builder.WebHost.UseUrls("http://+:8080");
 }
 
 // Forwarded Headers para proxies reversos (Nginx en Docker, Azure Front Door / Container Apps)
@@ -66,10 +68,48 @@ builder.Services.AddSwaggerGen();
 var app = builder.Build();
 
 app.UseForwardedHeaders();
-app.UseSwagger();
-app.UseSwaggerUI();
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 app.UseCors();
+
+// Protección opcional con GOALLINE_API_KEY (activa en Azure/Producción si la variable está configurada)
+var configuredApiKey = Environment.GetEnvironmentVariable("GOALLINE_API_KEY")
+    ?? builder.Configuration["Security:ApiKey"];
+if (!string.IsNullOrWhiteSpace(configuredApiKey))
+{
+    var expectedKeyBytes = Encoding.UTF8.GetBytes(configuredApiKey.Trim());
+    app.Use(async (ctx, next) =>
+    {
+        var path = ctx.Request.Path.Value ?? string.Empty;
+        var isProtectedWrite =
+            HttpMethods.IsPost(ctx.Request.Method) &&
+            (path.StartsWith("/api/Disparos", StringComparison.OrdinalIgnoreCase) ||
+             path.StartsWith("/api/EstadoVAR", StringComparison.OrdinalIgnoreCase) ||
+             path.StartsWith("/api/VarStream/command", StringComparison.OrdinalIgnoreCase));
+        var isProtectedGodotWs = path.Equals("/ws/godot", StringComparison.OrdinalIgnoreCase);
+
+        if (isProtectedWrite || isProtectedGodotWs)
+        {
+            var provided = ctx.Request.Headers["X-Api-Key"].FirstOrDefault()
+                ?? ctx.Request.Query["apiKey"].FirstOrDefault()
+                ?? string.Empty;
+            var providedBytes = Encoding.UTF8.GetBytes(provided);
+            var valid = providedBytes.Length == expectedKeyBytes.Length &&
+                        CryptographicOperations.FixedTimeEquals(providedBytes, expectedKeyBytes);
+            if (!valid)
+            {
+                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await ctx.Response.WriteAsJsonAsync(new { error = "Unauthorized: invalid or missing API key." });
+                return;
+            }
+        }
+        await next();
+    });
+}
 
 app.UseWebSockets(new WebSocketOptions
 {
@@ -118,6 +158,19 @@ app.Map("/ws/var-monitor", async (HttpContext ctx, VarStreamRelayService relay) 
 
     using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
     await relay.HandleMonitorConnectionAsync(ws, ctx.RequestAborted);
+});
+
+// WebSocket ultraliviano de estado VAR para el Cartel Gigante del Estadio (0 CORS / <10ms)
+app.Map("/ws/var-state", async (HttpContext ctx, VarStreamRelayService relay) =>
+{
+    if (!ctx.WebSockets.IsWebSocketRequest)
+    {
+        ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+        return;
+    }
+
+    using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
+    await relay.HandleVarStateConnectionAsync(ws, ctx.RequestAborted);
 });
 
 app.MapControllers();

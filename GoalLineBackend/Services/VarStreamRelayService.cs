@@ -11,11 +11,13 @@ public sealed record VarOutboundMessage(WebSocketMessageType Type, byte[] Payloa
 public sealed class VarStreamRelayService
 {
     private readonly ConcurrentDictionary<Guid, Channel<VarOutboundMessage>> _monitors = new();
+    private readonly ConcurrentDictionary<Guid, Channel<byte[]>> _varStateClients = new();
     private readonly SemaphoreSlim _godotSendLock = new(1, 1);
 
     private WebSocket? _godotSocket;
     private readonly byte[]?[] _latestFrames = new byte[4][];
     private string? _latestTelemetryJson;
+    private byte[]? _latestVarStateBytes;
 
     private long _framesReceived;
     private long _framesWindowCount;
@@ -163,6 +165,74 @@ public sealed class VarStreamRelayService
         _monitors.TryRemove(clientId, out _);
         channel.Writer.TryComplete();
 
+        try { await Task.WhenAll(sendTask, recvTask); } catch { /* ignore */ }
+    }
+
+    public void BroadcastVarState(object snapshot)
+    {
+        var json = JsonSerializer.Serialize(snapshot);
+        var bytes = Encoding.UTF8.GetBytes(json);
+        _latestVarStateBytes = bytes;
+        foreach (var kvp in _varStateClients)
+        {
+            kvp.Value.Writer.TryWrite(bytes);
+        }
+    }
+
+    public void BroadcastNewShot(object disparo)
+    {
+        var json = JsonSerializer.Serialize(new { type = "new_shot", shot = disparo });
+        BroadcastToMonitors(new VarOutboundMessage(WebSocketMessageType.Text, Encoding.UTF8.GetBytes(json)));
+    }
+
+    public async Task HandleVarStateConnectionAsync(WebSocket socket, CancellationToken ct)
+    {
+        var clientId = Guid.NewGuid();
+        var channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true,
+            SingleWriter = false
+        });
+        _varStateClients[clientId] = channel;
+
+        if (_latestVarStateBytes is not null)
+        {
+            channel.Writer.TryWrite(_latestVarStateBytes);
+        }
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var sendTask = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var payload in channel.Reader.ReadAllAsync(linkedCts.Token))
+                {
+                    if (socket.State != WebSocketState.Open) break;
+                    await socket.SendAsync(payload, WebSocketMessageType.Text, true, linkedCts.Token);
+                }
+            }
+            catch { /* ignore */ }
+        }, linkedCts.Token);
+
+        var recvTask = Task.Run(async () =>
+        {
+            var buf = new byte[256];
+            try
+            {
+                while (socket.State == WebSocketState.Open && !linkedCts.Token.IsCancellationRequested)
+                {
+                    var r = await socket.ReceiveAsync(buf, linkedCts.Token);
+                    if (r.MessageType == WebSocketMessageType.Close) break;
+                }
+            }
+            catch { /* ignore */ }
+        }, linkedCts.Token);
+
+        await Task.WhenAny(sendTask, recvTask);
+        linkedCts.Cancel();
+        _varStateClients.TryRemove(clientId, out _);
+        channel.Writer.TryComplete();
         try { await Task.WhenAll(sendTask, recvTask); } catch { /* ignore */ }
     }
 

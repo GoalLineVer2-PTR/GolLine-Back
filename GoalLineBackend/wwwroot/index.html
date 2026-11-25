@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700;800&family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/css/var-monitor.css">
+    <link rel="stylesheet" href="/css/var-monitor.css?v=2.1">
 </head>
 <body>
     <!-- Barra Superior Broadcast -->
@@ -99,6 +99,7 @@
                         <div class="cam-actions">
                             <button class="cam-mini-btn active" id="btnNetBehind" data-net="behindNet">RED</button>
                             <button class="cam-mini-btn" id="btnNetGk" data-net="gkPov">POV ARQ</button>
+                            <button class="cam-mini-btn" id="btnNetDrone" data-net="freeOrbit">DRONE</button>
                             <button class="cam-mini-btn btn-expand" data-slot="3" title="Expandir / Restaurar">⤢</button>
                         </div>
                     </header>
@@ -221,6 +222,6 @@
 
     <!-- SignalR cliente oficial (fallback automático a REST si no hay acceso CDN) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js" crossorigin="anonymous"></script>
-    <script src="/js/var-monitor.js"></script>
+    <script src="/js/var-monitor.js?v=2.2"></script>
 </body>
 </html>
